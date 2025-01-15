@@ -271,3 +271,19 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+'''
+ADD R0 R1 R2
+SUB R3 R1 R2
+MUL R4 R1 R2
+DIV R5 R1 R2
+LW R6 0
+SW R6 10
+MOV R7 R0
+BEQ R1 R2 12
+BGT R1 R2 14
+BLT R1 R2 16
+ADD R7 R7 1
+MOV R7 R0
+
+'''
