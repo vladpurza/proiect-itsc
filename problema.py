@@ -29,7 +29,172 @@ OPCODE_TABLE = {
     "RET": 17
 }
 
-# RISC-V Simulator Class
+class ALU:
+    def __init__(self, registers):
+        self.registers = registers
+
+    def _add(self, parts):
+        """ADD instruction (rd, rs1, rs2 or imm)"""
+        rd = int(parts[1][1])
+        rs1 = int(parts[2][1])
+        if parts[3].startswith("R"):
+            rs2 = int(parts[3][1])
+            self.registers[rd] = self.registers[rs1] + self.registers[rs2]
+        else:
+            imm = int(parts[3])
+            self.registers[rd] = self.registers[rs1] + imm
+
+    def _sub(self, parts):
+        """SUB instruction (rd, rs1, rs2)"""
+        rd = int(parts[1][1])
+        rs1 = int(parts[2][1])
+        if parts[3].startswith("R"):
+            rs2 = int(parts[3][1])
+            self.registers[rd] = self.registers[rs1] - self.registers[rs2]
+        else:
+            imm = int(parts[3])
+            self.registers[rd] = self.registers[rs1] - imm
+
+    def _mul(self, parts):
+        """MUL instruction (rd, rs1, rs2)"""
+        rd = int(parts[1][1])
+        rs1 = int(parts[2][1])
+        rs2 = int(parts[3][1])
+        self.registers[rd] = self.registers[rs1] * self.registers[rs2]
+
+    def _div(self, parts):
+        """DIV instruction (rd, rs1, rs2)"""
+        rd = int(parts[1][1])
+        rs1 = int(parts[2][1])
+        rs2 = int(parts[3][1])
+        if self.registers[rs2] != 0:
+            self.registers[rd] = self.registers[rs1] // self.registers[rs2]
+        else:
+            messagebox.showerror("Error", "Division by zero!")
+
+    def _shift_left(self, parts):
+        """SHL instruction (rd, rs1): Shift left rs1 by 1 and store in rd."""
+        rd = int(parts[1][1])
+        rs1 = int(parts[2][1])
+        self.registers[rd] = self.registers[rs1] << 1
+
+    def _shift_right(self, parts):
+        """SHR instruction (rd, rs1): Shift right rs1 by 1 and store in rd."""
+        rd = int(parts[1][1])
+        rs1 = int(parts[2][1])
+        self.registers[rd] = self.registers[rs1] >> 1
+
+class LoadStore:
+    def __init__(self, memory, registers):
+        self.memory = memory
+        self.registers = registers
+
+    def _load(self, parts):
+        """LW instruction (rd, address)"""
+        rd = int(parts[1][1])
+        address = int(parts[2])
+        if 0 <= address < MEMORY_SIZE:
+            self.registers[rd] = self.memory[address]
+        else:
+            messagebox.showerror("Error", "Memory access out of bounds!")
+
+    def _store(self, parts):
+        """SW instruction (rs, address)"""
+        rs = int(parts[1][1])
+        address = int(parts[2])
+        if 0 <= address < MEMORY_SIZE:
+            self.memory[address] = self.registers[rs]
+        else:
+            messagebox.showerror("Error", "Memory access out of bounds!")
+
+class Branch:
+    def __init__(self, registers, simulator):
+        self.registers = registers
+        self.simulator = simulator
+
+    def _cmp(self, parts):
+        """CMP instruction (rs1, rs2): Compare rs1 and rs2."""
+        rs1 = int(parts[1][1])  # Extract register number from string (e.g., R1 -> 1)
+        rs2 = int(parts[2][1])
+
+        if self.registers[rs1] > self.registers[rs2]:
+            self.simulator.gt_flag = True  # Register 1 is greater than Register 2
+            self.simulator.lt_flag = False
+            self.simulator.eq_flag = False
+        elif self.registers[rs1] < self.registers[rs2]:
+            self.simulator.gt_flag = False
+            self.simulator.lt_flag = True  # Register 1 is less than Register 2
+            self.simulator.eq_flag = False
+        else:
+            self.simulator.gt_flag = False
+            self.simulator.lt_flag = False
+            self.simulator.eq_flag = True  # Registers are equal
+
+        print(f"CMP result: {'Greater' if self.simulator.gt_flag else ('Less' if self.simulator.lt_flag else 'Equal')}")
+
+    def _branch_equal(self, parts):
+        """BEQ instruction (rs1, rs2, target)"""
+        if self.simulator.eq_flag:  # Use the comparison flag
+            self.simulator.pc = int(parts[1]) - 2  # Set PC to the target address
+            print(f"Branching to {parts[1]}")
+
+    def _branch_greater(self, parts):
+        """BGT instruction (rs1, rs2, target)"""
+        if self.simulator.gt_flag:  # Use the comparison flag
+            self.simulator.pc = int(parts[1]) - 2
+            print(f"Branching to {parts[1]}")
+
+    def _branch_less(self, parts):
+        """BLT instruction (rs1, rs2, target)"""
+        if self.simulator.lt_flag:  # Use the comparison flag
+            self.simulator.pc = int(parts[1]) - 2
+            print(f"Branching to {parts[1]}")
+
+class Control:
+    def __init__(self, registers, simulator):
+        self.registers = registers
+        self.simulator = simulator
+
+    def _move(self, parts):
+        """MOV instruction (rd, rs1)"""
+        rd = int(parts[1][1])
+        rs1 = int(parts[2][1])
+        self.registers[rd] = self.registers[rs1]
+
+    def _out(self, parts):
+        """OUT instruction (prints the value of the specified register)."""
+        if len(parts) != 2:
+            raise ValueError(f"Invalid OUT instruction: {parts}")
+        
+        reg = int(parts[1][1])  # Extract the register number
+        if 0 <= reg < NUM_REGISTERS:
+            value = self.registers[reg]
+            if self.simulator.output_callback:
+                self.simulator.output_callback(f"{value}\n")
+        else:
+            messagebox.showerror("Error", f"Register R{reg} out of bounds!")
+
+    def _jms(self, parts):
+        """JMS instruction (jump to subroutine)."""
+        target = int(parts[1])  # Target address for the jump
+        self.simulator.stack.append(self.simulator.pc + 1)  # Save the return address (next instruction after JMS)
+        self.simulator.pc = target - 2 # Jump to the subroutine (adjust PC for 0-indexed addressing)
+        print(f"Jumping to subroutine at address {target}")
+
+    def _ret(self):
+        """RET instruction (return from subroutine)."""
+        if self.simulator.stack:
+            self.simulator.pc = self.simulator.stack.pop() - 1 # Pop the return address and set PC to it
+            print(f"Returning to address {self.simulator.pc}")  # Show the next instruction after the JMS
+        else:
+            messagebox.showerror("Error", "Return address stack is empty!")
+
+    def _halt(self):
+        """HLT instruction: Stop program execution but allow stepping to restart."""
+        self.simulator.running = False
+        self.simulator.pc = len(self.simulator.instructions) - 1
+        messagebox.showinfo("Halt", "Program execution halted. You can step to resume.")
+
 class RiscVSimulator:
     def __init__(self, output_callback=None):
         self.registers = [0] * NUM_REGISTERS
@@ -39,10 +204,13 @@ class RiscVSimulator:
         self.instructions = []
         self.output_callback = output_callback  # Callback for output
         self.stack = []  # Stack to store return addresses
-        self.equal_flag = False  # Comparison flag
+        self.eq_flag = False  # Equal flag
         self.gt_flag = False  # Greater than flag
         self.lt_flag = False  # Less than flag
-        self.eq_flag = False  # Equal flag
+        self.alu = ALU(self.registers)  # Initialize ALU with registers
+        self.load_store = LoadStore(self.memory, self.registers)  # Initialize LoadStore with memory and registers
+        self.branch = Branch(self.registers, self)  # Initialize Branch with registers and simulator
+        self.control = Control(self.registers, self)  # Initialize Control with registers and simulator
 
     def load_program(self, instructions):
         """Load a program (list of instructions) into memory."""
@@ -73,207 +241,60 @@ class RiscVSimulator:
             print("Program finished.")
             return False
 
-
     def _execute_instruction(self, instruction):
         """Decode and execute a single RISC-V instruction."""
         parts = instruction.split()
         opcode = parts[0]
         if opcode == "ADD":
-            self._add(parts)
+            self.alu._add(parts)
         elif opcode == "SUB":
-            self._sub(parts)
+            self.alu._sub(parts)
         elif opcode == "MUL":
-            self._mul(parts)
+            self.alu._mul(parts)
         elif opcode == "DIV":
-            self._div(parts)
-        elif opcode == "LW":
-            self._load(parts)
-        elif opcode == "SW":
-            self._store(parts)
-        elif opcode == "BEQ":
-            self._branch_equal(parts)
-        elif opcode == "BGT":
-            self._branch_greater(parts)
-        elif opcode == "BLT":
-            self._branch_less(parts)
-        elif opcode == "MOV":
-            self._move(parts)
+            self.alu._div(parts)
         elif opcode == "SHL":
-            self._shift_left(parts)
+            self.alu._shift_left(parts)
         elif opcode == "SHR":
-            self._shift_right(parts)
+            self.alu._shift_right(parts)
+        elif opcode == "LW":
+            self.load_store._load(parts)
+        elif opcode == "SW":
+            self.load_store._store(parts)
+        elif opcode == "BEQ":
+            self.branch._branch_equal(parts)
+        elif opcode == "BGT":
+            self.branch._branch_greater(parts)
+        elif opcode == "BLT":
+            self.branch._branch_less(parts)
+        elif opcode == "MOV":
+            self.control._move(parts)
         elif opcode == "OUT":
-            self._out(parts)
+            self.control._out(parts)
         elif opcode == "HLT":
-            self._halt()
+            self.control._halt()
         elif opcode == "CMP":
-            self._cmp(parts)
+            self.branch._cmp(parts)
         elif opcode == "JMS":
-            self._jms(parts)
+            self.control._jms(parts)
         elif opcode == "RET":
-            self._ret()
+            self.control._ret()
         else:
             messagebox.showerror("Error", f"Unknown instruction: {opcode}")
 
-    def _add(self, parts):
-        """ADD instruction (rd, rs1, rs2 or imm)"""
-        rd = int(parts[1][1])
-        rs1 = int(parts[2][1])
-        if parts[3].startswith("R"):
-            rs2 = int(parts[3][1])
-            self.registers[rd] = self.registers[rs1] + self.registers[rs2]
-        else:
-            imm = int(parts[3])
-            self.registers[rd] = self.registers[rs1] + imm
-    
-    def _sub(self, parts):
-        """SUB instruction (rd, rs1, rs2)"""
-        rd = int(parts[1][1])
-        rs1 = int(parts[2][1])
-        if parts[3].startswith("R"):
-            rs2 = int(parts[3][1])
-            self.registers[rd] = self.registers[rs1] - self.registers[rs2]
-        else:
-            imm = int(parts[3])
-            self.registers[rd] = self.registers[rs1] + imm
-    
-    def _mul(self, parts):
-        """MUL instruction (rd, rs1, rs2)"""
-        rd = int(parts[1][1])
-        rs1 = int(parts[2][1])
-        rs2 = int(parts[3][1])
-        self.registers[rd] = self.registers[rs1] * self.registers[rs2]
-    
-    def _div(self, parts):
-        """DIV instruction (rd, rs1, rs2)"""
-        rd = int(parts[1][1])
-        rs1 = int(parts[2][1])
-        rs2 = int(parts[3][1])
-        if self.registers[rs2] != 0:
-            self.registers[rd] = self.registers[rs1] // self.registers[rs2]
-        else:
-            messagebox.showerror("Error", "Division by zero!")
-    
-    def _load(self, parts):
-        """LW instruction (rd, address)"""
-        rd = int(parts[1][1])
-        address = int(parts[2])
-        if 0 <= address < MEMORY_SIZE:
-            self.registers[rd] = self.memory[address]
-        else:
-            messagebox.showerror("Error", "Memory access out of bounds!")
-    
-    def _store(self, parts):
-        """SW instruction (rs, address)"""
-        rs = int(parts[1][1])
-        address = int(parts[2])
-        if 0 <= address < MEMORY_SIZE:
-            self.memory[address] = self.registers[rs]
-        else:
-            messagebox.showerror("Error", "Memory access out of bounds!")
-    
-    def _branch_equal(self, parts):
-        """BEQ instruction (rs1, rs2, target)"""
-        if self.eq_flag:  # Use the comparison flag
-            self.pc = int(parts[1]) - 2  # Set PC to the target address
-            print(f"Branching to {parts[1]}")
-
-    def _branch_greater(self, parts):
-        """BGT instruction (rs1, rs2, target)"""
-        if self.gt_flag:  # Use the comparison flag
-            self.pc = int(parts[1]) - 2
-            print(f"Branching to {parts[1]}")
-
-    def _branch_less(self, parts):
-        """BLT instruction (rs1, rs2, target)"""
-        if self.lt_flag:  # Use the comparison flag
-            self.pc = int(parts[1]) - 2
-            print(f"Branching to {parts[1]}")
-
-    def _move(self, parts):
-        """MOV instruction (rd, rs1)"""
-        rd = int(parts[1][1])
-        rs1 = int(parts[2][1])
-        self.registers[rd] = self.registers[rs1]
-
-
-    def _shift_left(self, parts):
-        """SHL instruction (rd, rs1): Shift left rs1 by 1 and store in rd."""
-        rd = int(parts[1][1])
-        rs1 = int(parts[2][1])
-        self.registers[rd] = self.registers[rs1] << 1
-
-    def _shift_right(self, parts):
-        """SHR instruction (rd, rs1): Shift right rs1 by 1 and store in rd."""
-        rd = int(parts[1][1])
-        rs1 = int(parts[2][1])
-        self.registers[rd] = self.registers[rs1] >> 1
-    
-    def _out(self, parts):
-        """OUT instruction (prints the value of the specified register)."""
-        if len(parts) != 2:
-            raise ValueError(f"Invalid OUT instruction: {parts}")
-        
-        reg = int(parts[1][1])  # Extract the register number
-        if 0 <= reg < NUM_REGISTERS:
-            value = self.registers[reg]
-            if self.output_callback:
-                self.output_callback(f"{value}\n")
-        else:
-            messagebox.showerror("Error", f"Register R{reg} out of bounds!")
-
-    def _cmp(self, parts):
-        """CMP instruction (rs1, rs2): Compare rs1 and rs2."""
-        rs1 = int(parts[1][1])  # Extract register number from string (e.g., R1 -> 1)
-        rs2 = int(parts[2][1])
-
-        if self.registers[rs1] > self.registers[rs2]:
-            self.gt_flag = True  # Register 1 is greater than Register 2
-            self.lt_flag = False
-            self.eq_flag = False
-        elif self.registers[rs1] < self.registers[rs2]:
-            self.gt_flag = False
-            self.lt_flag = True  # Register 1 is less than Register 2
-            self.eq_flag = False
-        else:
-            self.gt_flag = False
-            self.lt_flag = False
-            self.eq_flag = True  # Registers are equal
-
-        print(f"CMP result: {'Greater' if self.gt_flag else ('Less' if self.lt_flag else 'Equal')}")
-
-    def _jms(self, parts):
-        """JMS instruction (jump to subroutine)."""
-        target = int(parts[1])  # Target address for the jump
-        self.stack.append(self.pc + 1)  # Save the return address (next instruction after JMS)
-        self.pc = target - 2 # Jump to the subroutine (adjust PC for 0-indexed addressing)
-        print(f"Jumping to subroutine at address {target}")
-
-    def _ret(self):
-        """RET instruction (return from subroutine)."""
-        if self.stack:
-            self.pc = self.stack.pop() - 1 # Pop the return address and set PC to it
-            print(f"Returning to address {self.pc}")  # Show the next instruction after the JMS
-        else:
-            messagebox.showerror("Error", "Return address stack is empty!")
-
-    def _halt(self):
-        """HLT instruction: Stop program execution but allow stepping to restart."""
-        self.running = False
-        self.pc = len(self.instructions) - 1
-        messagebox.showinfo("Halt", "Program execution halted. You can step to resume.")
-
     def reset(self):
-        """Reset the simulator to its initial state."""
         self.registers = [0] * NUM_REGISTERS
         self.memory = [0] * MEMORY_SIZE
+        self.alu = ALU(self.registers)
+        self.load_store = LoadStore(self.memory, self.registers)
+        self.branch = Branch(self.registers, self)  # Reinitialize Branch with registers and self
+        self.control = Control(self.registers, self)
         self.pc = 0
-        self.running = False
-        print("Simulator reset.")
+        self.eq_flag = False
+        self.gt_flag = False
+        self.lt_flag = False
 
-# GUI Class for the Simulator
 class RiscVSimulatorGUI:
-
     def __init__(self, root):
         self.root = root
         self.root.title("RISC-V Simulator")
@@ -339,33 +360,30 @@ class RiscVSimulatorGUI:
         self.output_text.pack()
 
     def load_program(self):
-        """Load the program into the simulator."""
         program = self.program_text.get("1.0", tk.END).strip().splitlines()
         self.simulator.load_program(program)
         self.update_memory()
     
     def run_program(self):
-        """Run the program until completion."""
+        self.simulator.running = True
         while self.simulator.execute():
             self.update_registers()
             self.update_memory()
+            self.update_flags()
             if not self.simulator.running:
                 break
 
     def step_program(self):
-        """Execute one step of the program."""
         if not self.simulator.running and self.simulator.pc == len(self.simulator.instructions):
             messagebox.showinfo("Info", "Program halted. Reset to run again.")
             return
 
-        instruction = self.simulator.instructions[self.simulator.pc]
         if self.simulator.execute():
             self.update_registers()
             self.update_memory()
             self.update_flags()
 
     def reset_program(self):
-        """Reset the simulator."""
         self.simulator.reset()
         self.update_registers()
         self.update_memory()
@@ -379,12 +397,10 @@ class RiscVSimulatorGUI:
         self.update_memory()
 
     def update_registers(self):
-        """Update the displayed register values."""
         for i in range(NUM_REGISTERS):
             self.register_labels[i].config(text=f"R{i}: {self.simulator.registers[i]}")
     
     def update_memory(self):
-        """Update the displayed memory values."""
         for i in range(MEMORY_ROWS):
             for j in range(MEMORY_COLS):
                 addr = i * MEMORY_COLS + j
@@ -399,32 +415,27 @@ class RiscVSimulatorGUI:
                     self.memory_labels[i][j].config(bg="white")
 
     def update_flags(self):
-        """Update the displayed flags."""
         self.flags_labels["Equal"].config(text=f"Equal: {self.simulator.eq_flag}")
         self.flags_labels["Greater"].config(text=f"Greater: {self.simulator.gt_flag}")
         self.flags_labels["Less"].config(text=f"Less: {self.simulator.lt_flag}")
     
     def clear_flags(self):
-        """Clear the flags."""
         self.simulator.eq_flag = False
         self.simulator.gt_flag = False
         self.simulator.lt_flag = False
         self.update_flags()
 
     def write_output(self, text):
-        """Write text to the output box."""
         self.output_text.config(state="normal")
         self.output_text.insert(tk.END, text + "\n")
         self.output_text.config(state="disabled")
         self.output_text.see(tk.END)
 
     def clear_output(self):
-        """Clear the output text box."""
         self.output_text.config(state="normal")
         self.output_text.delete(1.0, tk.END)  # Clear the text area
         self.output_text.config(state="disabled")
 
-# Main application
 def main():
     root = tk.Tk()
     gui = RiscVSimulatorGUI(root)
